@@ -1,4 +1,3 @@
-const { isMongoConnected, readLocalStore, writeLocalStore } = require('../db');
 const User = require('../models/User');
 const Submission = require('../models/Submission');
 const ContestConfig = require('../models/ContestConfig');
@@ -29,153 +28,89 @@ const DEFAULT_PROMPTS = [
 ];
 
 const dataService = {
-  // --- USERS ---
+  // --- USERS (MongoDB Atlas) ---
   async findUserBySuc(sucCode) {
-    if (isMongoConnected()) {
-      return await User.findOne({ sucCode });
-    }
-    const store = readLocalStore();
-    return store.users.find(u => u.sucCode === sucCode) || null;
+    return await User.findOne({ sucCode: String(sucCode).trim() });
   },
 
   async findUserById(id) {
-    if (isMongoConnected()) {
-      return await User.findById(id);
-    }
-    const store = readLocalStore();
-    return store.users.find(u => u._id === id || u.id === id) || null;
+    return await User.findById(id);
   },
 
   async createUser({ sucCode, name, password }) {
-    if (isMongoConnected()) {
-      const user = new User({ sucCode, name, password, roundsCompleted: [] });
-      return await user.save();
-    }
-    const store = readLocalStore();
-    const newUser = {
-      _id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      sucCode,
-      name,
+    const user = new User({
+      sucCode: String(sucCode).trim(),
+      name: String(name).trim(),
       password,
-      roundsCompleted: [],
-      createdAt: new Date().toISOString()
-    };
-    store.users.push(newUser);
-    writeLocalStore(store);
-    return newUser;
+      roundsCompleted: []
+    });
+    return await user.save();
   },
 
   async getAllUsers() {
-    if (isMongoConnected()) {
-      return await User.find({}).sort({ createdAt: -1 });
-    }
-    const store = readLocalStore();
-    return store.users || [];
+    return await User.find({}).sort({ createdAt: -1 });
   },
 
   async addCompletedRound(userId, roundNumber) {
-    if (isMongoConnected()) {
-      return await User.findByIdAndUpdate(
-        userId,
-        { $addToSet: { roundsCompleted: roundNumber } },
-        { new: true }
-      );
-    }
-    const store = readLocalStore();
-    const user = store.users.find(u => u._id === userId || u.id === userId);
-    if (user) {
-      if (!user.roundsCompleted) user.roundsCompleted = [];
-      if (!user.roundsCompleted.includes(roundNumber)) {
-        user.roundsCompleted.push(roundNumber);
-      }
-      writeLocalStore(store);
-    }
-    return user;
+    return await User.findByIdAndUpdate(
+      userId,
+      { $addToSet: { roundsCompleted: Number(roundNumber) } },
+      { new: true }
+    );
   },
 
-  // --- SUBMISSIONS ---
+  // --- SUBMISSIONS (MongoDB Atlas) ---
   async createSubmission(subData) {
-    if (isMongoConnected()) {
-      const sub = new Submission(subData);
-      return await sub.save();
-    }
-    const store = readLocalStore();
-    const newSub = {
-      _id: 'sub_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      ...subData,
-      completedAt: new Date().toISOString()
-    };
-    store.submissions.push(newSub);
-    writeLocalStore(store);
-    return newSub;
+    const sub = new Submission(subData);
+    return await sub.save();
   },
 
   async getSubmission(sucCode, roundNumber) {
-    if (isMongoConnected()) {
-      return await Submission.findOne({ sucCode, roundNumber });
-    }
-    const store = readLocalStore();
-    return store.submissions.find(s => s.sucCode === sucCode && s.roundNumber === Number(roundNumber)) || null;
+    return await Submission.findOne({
+      sucCode: String(sucCode).trim(),
+      roundNumber: Number(roundNumber)
+    });
   },
 
   async getUserSubmissions(sucCode) {
-    if (isMongoConnected()) {
-      return await Submission.find({ sucCode }).sort({ roundNumber: 1 });
-    }
-    const store = readLocalStore();
-    return store.submissions.filter(s => s.sucCode === sucCode).sort((a, b) => a.roundNumber - b.roundNumber);
+    return await Submission.find({
+      sucCode: String(sucCode).trim()
+    }).sort({ roundNumber: 1 });
   },
 
   async getAllSubmissions() {
-    if (isMongoConnected()) {
-      return await Submission.find({}).sort({ completedAt: -1 });
-    }
-    const store = readLocalStore();
-    return store.submissions || [];
+    return await Submission.find({}).sort({ completedAt: -1 });
   },
 
-  // --- CONTEST CONFIG ---
+  // --- CONTEST CONFIG (MongoDB Atlas) ---
   async getConfig() {
-    if (isMongoConnected()) {
-      let cfg = await ContestConfig.findOne({});
-      if (!cfg) {
-        cfg = new ContestConfig({
-          festName: 'BCAlgorix',
-          leaderboardRevealed: false,
-          roundTimeLimits: [120, 150, 180],
-          roundPrompts: DEFAULT_PROMPTS
-        });
-        await cfg.save();
-      }
-      return cfg;
-    }
-    const store = readLocalStore();
-    if (!store.config) {
-      store.config = {
+    let cfg = await ContestConfig.findOne({});
+    if (!cfg) {
+      cfg = new ContestConfig({
         festName: 'BCAlgorix',
         leaderboardRevealed: false,
         roundTimeLimits: [120, 150, 180],
         roundPrompts: DEFAULT_PROMPTS
-      };
-      writeLocalStore(store);
+      });
+      await cfg.save();
     }
-    return store.config;
+    return cfg;
   },
 
   async updateConfig(updates) {
-    if (isMongoConnected()) {
-      let cfg = await ContestConfig.findOne({});
-      if (!cfg) {
-        cfg = new ContestConfig({ ...updates });
-      } else {
-        Object.assign(cfg, updates);
-      }
+    let cfg = await ContestConfig.findOne({});
+    if (!cfg) {
+      cfg = new ContestConfig({
+        festName: 'BCAlgorix',
+        leaderboardRevealed: false,
+        roundTimeLimits: [120, 150, 180],
+        roundPrompts: DEFAULT_PROMPTS,
+        ...updates
+      });
       return await cfg.save();
     }
-    const store = readLocalStore();
-    store.config = { ...(store.config || {}), ...updates };
-    writeLocalStore(store);
-    return store.config;
+    Object.assign(cfg, updates);
+    return await cfg.save();
   }
 };
 

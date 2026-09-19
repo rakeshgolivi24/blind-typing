@@ -34,7 +34,7 @@ app.get('/api/health', (req, res) => {
     status: 'online',
     fest: 'BCAlgorix',
     event: 'Blind Typing Contest',
-    database: isMongoConnected() ? 'MongoDB' : 'Resilient File Store',
+    database: isMongoConnected() ? 'MongoDB Atlas (Connected)' : 'Connecting to Atlas...',
     timestamp: new Date().toISOString()
   });
 });
