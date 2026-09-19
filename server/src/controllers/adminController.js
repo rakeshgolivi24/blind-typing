@@ -126,6 +126,31 @@ const adminController = {
       console.error('getSubmissionInspection error:', err);
       return res.status(500).json({ error: 'Failed to retrieve submission details.' });
     }
+  },
+
+  async getPrompts(req, res) {
+    try {
+      const config = await dataService.getConfig();
+      return res.json({ prompts: config.roundPrompts || [] });
+    } catch (err) {
+      console.error('getPrompts error:', err);
+      return res.status(500).json({ error: 'Failed to retrieve prompts.' });
+    }
+  },
+
+  async updatePrompts(req, res) {
+    try {
+      const { prompts } = req.body;
+      if (!Array.isArray(prompts) || prompts.length !== 3) {
+        return res.status(400).json({ error: 'Exactly 3 round prompts are required.' });
+      }
+
+      await dataService.updateConfig({ roundPrompts: prompts });
+      return res.json({ message: 'Contest round paragraphs updated in MongoDB Atlas successfully!', prompts });
+    } catch (err) {
+      console.error('updatePrompts error:', err);
+      return res.status(500).json({ error: 'Failed to update round prompts.' });
+    }
   }
 };
 

@@ -13,7 +13,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 
-export default function DashboardPage({ user, onStartRound, onViewLeaderboard }) {
+export default function DashboardPage({ user, onStartRound, onStartPractice, onViewLeaderboard }) {
   const completedRounds = user?.roundsCompleted || [];
   const submissions = user?.submissions || [];
 
@@ -152,6 +152,31 @@ export default function DashboardPage({ user, onStartRound, onViewLeaderboard })
           </button>
         </div>
       )}
+
+      {/* 1-Minute Warm-Up Banner */}
+      <div className="mb-8 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-burgundy-950/70 via-wine-card to-burgundy-950/70 border border-burgundy-700/60 shadow-burgundy flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-10 h-10 rounded-xl bg-gold-500/10 border border-gold-500/40 flex items-center justify-center text-gold-400 flex-shrink-0">
+            <Zap className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-fest font-bold text-white">
+              Want to calibrate your fingers first?
+            </h3>
+            <p className="text-xs text-gray-400">
+              Try the 1-Minute Practice Arena with unlimited attempts. Test visible, masked, or blind mode before your official attempt.
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => onStartPractice && onStartPractice(1)}
+          className="px-5 py-2.5 rounded-xl bg-wine-card hover:bg-wine-cardHover border border-gold-500/50 text-gold-300 hover:text-white text-xs font-bold shadow-sm transition-all whitespace-nowrap flex items-center justify-center gap-2"
+        >
+          <Zap className="w-3.5 h-3.5 text-gold-400" />
+          <span>Launch 1-Min Practice</span>
+        </button>
+      </div>
 
       {/* Rounds Arena Grid */}
       <h2 className="text-xl font-fest font-bold text-white mb-5 flex items-center space-x-2">

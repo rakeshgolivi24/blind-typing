@@ -13,9 +13,11 @@ export default function App() {
   const [admin, setAdmin] = useState(null);
   const [adminToken, setAdminToken] = useState(localStorage.getItem('bcalgorix_admin_token') || '');
 
-  const [currentView, setCurrentView] = useState('auth'); // 'auth' | 'dashboard' | 'arena' | 'leaderboard' | 'admin'
+  const [currentView, setCurrentView] = useState('auth'); // 'auth' | 'dashboard' | 'arena' | 'leaderboard' | 'admin' | 'practice'
   const [activeRoundNumber, setActiveRoundNumber] = useState(1);
   const [roundResult, setRoundResult] = useState(null);
+  const [practiceMode, setPracticeMode] = useState(1);
+  const [practiceSessionKey, setPracticeSessionKey] = useState(Date.now());
 
   // Restore candidate session on load
   useEffect(() => {
@@ -138,16 +140,37 @@ export default function App() {
           <DashboardPage
             user={user}
             onStartRound={handleStartRound}
+            onStartPractice={(m = 1) => {
+              setPracticeMode(m);
+              setPracticeSessionKey(Date.now());
+              setCurrentView('practice');
+            }}
             onViewLeaderboard={() => setCurrentView('leaderboard')}
           />
         )}
 
         {currentView === 'arena' && user && (
           <TypingArenaPage
+            key={`contest-round-${activeRoundNumber}`}
             roundNumber={activeRoundNumber}
             token={candidateToken}
             onFinishRound={handleFinishRound}
             onCancel={() => setCurrentView('dashboard')}
+          />
+        )}
+
+        {currentView === 'practice' && (
+          <TypingArenaPage
+            key={`practice-${practiceMode}-${practiceSessionKey}`}
+            roundNumber={practiceMode}
+            isPractice={true}
+            practiceMode={practiceMode}
+            token={candidateToken}
+            onChangePracticeMode={(m) => {
+              setPracticeMode(m);
+              setPracticeSessionKey(Date.now());
+            }}
+            onCancel={() => setCurrentView(user ? 'dashboard' : 'auth')}
           />
         )}
 

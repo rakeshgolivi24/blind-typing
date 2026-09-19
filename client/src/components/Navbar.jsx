@@ -1,5 +1,5 @@
 import React from 'react';
-import { Keyboard, Trophy, ShieldAlert, LogOut, User as UserIcon, LayoutDashboard, Crown } from 'lucide-react';
+import { Keyboard, Trophy, ShieldAlert, LogOut, User as UserIcon, LayoutDashboard, Crown, Zap } from 'lucide-react';
 
 export default function Navbar({ user, admin, currentView, setView, onLogout }) {
   return (
@@ -31,12 +31,12 @@ export default function Navbar({ user, admin, currentView, setView, onLogout }) 
           </div>
 
           {/* Navigation Items */}
-          <div className="flex items-center space-x-3 sm:space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-3">
             {/* Candidate Dashboard */}
             {user && (
               <button
                 onClick={() => setView('dashboard')}
-                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+                className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                   currentView === 'dashboard'
                     ? 'bg-burgundy-900/70 text-gold-300 border border-burgundy-700/60 shadow-sm'
                     : 'text-gray-300 hover:text-white hover:bg-wine-card'
@@ -47,11 +47,24 @@ export default function Navbar({ user, admin, currentView, setView, onLogout }) 
               </button>
             )}
 
+            {/* Practice Arena (1-Minute Warm-Up) */}
+            <button
+              onClick={() => setView('practice')}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                currentView === 'practice'
+                  ? 'bg-amber-950/80 text-gold-300 border border-gold-500/70 shadow-gold'
+                  : 'text-gray-300 hover:text-gold-300 hover:bg-wine-card'
+              }`}
+            >
+              <Zap className="w-4 h-4 text-gold-400" />
+              <span>Practice (1m)</span>
+            </button>
+
             {/* Admin Portal Button */}
             {admin && (
               <button
                 onClick={() => setView('admin')}
-                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+                className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                   currentView === 'admin'
                     ? 'bg-burgundy-900/70 text-gold-300 border border-burgundy-700/60 shadow-sm'
                     : 'text-gray-300 hover:text-white hover:bg-wine-card'
@@ -65,7 +78,7 @@ export default function Navbar({ user, admin, currentView, setView, onLogout }) 
             {/* Leaderboard Button */}
             <button
               onClick={() => setView('leaderboard')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                 currentView === 'leaderboard'
                   ? 'bg-burgundy-900/70 text-gold-300 border border-burgundy-700/60 shadow-sm'
                   : 'text-gray-300 hover:text-white hover:bg-wine-card'

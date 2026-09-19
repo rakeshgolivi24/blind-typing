@@ -1,6 +1,34 @@
 const dataService = require('../services/dataService');
 
 const contestController = {
+  async getPracticePrompt(req, res) {
+    try {
+      const mode = parseInt(req.query.mode, 10) || 1;
+      const practiceText = "Practice builds unstoppable algorithmic muscle memory. Every keystroke is an opportunity to sharpen focus, master keyboard topography, and prepare for the ultimate championship arena of BCAlgorix.";
+      
+      const permissions = {
+        mode,
+        isPractice: true,
+        backspaceAllowed: mode === 1 || mode === 2,
+        maskAsterisk: mode === 2 || mode === 3,
+        textVisible: mode === 1,
+        timeLimit: 60
+      };
+
+      return res.json({
+        practice: {
+          title: `1-Minute Warm-Up (Mode ${mode})`,
+          timeLimit: 60,
+          text: practiceText,
+          permissions
+        }
+      });
+    } catch (err) {
+      console.error('getPracticePrompt error:', err);
+      return res.status(500).json({ error: 'Failed to retrieve practice prompt.' });
+    }
+  },
+
   async getRound(req, res) {
     try {
       const roundNumber = parseInt(req.params.roundNumber, 10);

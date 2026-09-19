@@ -8,10 +8,23 @@ import {
   Eye, 
   EyeOff, 
   Delete,
-  MousePointerClick
+  MousePointerClick,
+  Zap,
+  Target,
+  FileText,
+  RotateCcw,
+  Sparkles
 } from 'lucide-react';
 
-export default function TypingArenaPage({ roundNumber, token, onFinishRound, onCancel }) {
+export default function TypingArenaPage({ 
+  roundNumber, 
+  isPractice = false, 
+  practiceMode = 1,
+  token, 
+  onFinishRound, 
+  onCancel,
+  onChangePracticeMode
+}) {
   const [roundData, setRoundData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -28,35 +41,48 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
 
   // Time tracking
   const startTimeRef = useRef(null);
-  const [timeRemaining, setTimeRemaining] = useState(120);
+  const [timeRemaining, setTimeRemaining] = useState(isPractice ? 60 : 120);
   const [elapsedDisplay, setElapsedDisplay] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [isFocused, setIsFocused] = useState(true);
 
-  // Anti-cheat state
+  // Practice completion modal
+  const [practiceResult, setPracticeResult] = useState(null);
+
+  // Anti-cheat state (only for official contest rounds)
   const [tabSwitches, setTabSwitches] = useState(0);
   const [showWarningModal, setShowWarningModal] = useState(false);
 
   const inputRef = useRef(null);
   const timerIntervalRef = useRef(null);
 
-  // Load round prompt & initialize words
+  // Load round prompt or practice prompt
   useEffect(() => {
     let isMounted = true;
-    async function loadRound() {
+    async function loadData() {
       try {
         setLoading(true);
-        const res = await fetch(`/api/contest/round/${roundNumber}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        setError('');
+
+        let url = `/api/contest/round/${roundNumber}`;
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        if (isPractice) {
+          url = `/api/contest/practice-prompt?mode=${practiceMode}`;
+        }
+
+        const res = await fetch(url, { headers });
         const data = await res.json();
         if (!res.ok) {
-          throw new Error(data.error || 'Failed to initialize round');
+          throw new Error(data.error || 'Failed to initialize arena');
         }
 
         if (isMounted) {
-          setRoundData(data.round);
-          const splitWords = (data.round.text || '').trim().split(/\s+/);
+          const payload = isPractice ? data.practice : data.round;
+          setRoundData(payload);
+
+          const splitWords = (payload.text || '').trim().split(/\s+/);
           setWords(splitWords);
           wordsRef.current = splitWords;
 
@@ -67,7 +93,12 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
           currentWordIndexRef.current = 0;
           setCurrentWordIndex(0);
 
-          setTimeRemaining(data.round.timeLimit || 120);
+          const limit = payload.timeLimit || (isPractice ? 60 : 120);
+          setTimeRemaining(limit);
+          setElapsedDisplay(0);
+          setSubmitting(false);
+          setIsFocused(true);
+
           startTimeRef.current = Date.now();
           setLoading(false);
         }
@@ -79,11 +110,11 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
       }
     }
 
-    loadRound();
+    loadData();
     return () => { isMounted = false; };
-  }, [roundNumber, token]);
+  }, [roundNumber, isPractice, practiceMode, token]);
 
-  // Keep input focused so browser is always capturing keystrokes
+  // Keep input focused automatically
   useEffect(() => {
     if (!loading && roundData && inputRef.current) {
       inputRef.current.focus();
@@ -92,14 +123,14 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
 
   // Countdown timer loop
   useEffect(() => {
-    if (!roundData || loading || submitting) return;
+    if (!roundData || loading || submitting || practiceResult) return;
 
     timerIntervalRef.current = setInterval(() => {
       const now = Date.now();
       const elapsedSec = Math.floor((now - (startTimeRef.current || now)) / 1000);
       setElapsedDisplay(elapsedSec);
 
-      const limit = roundData.timeLimit || 120;
+      const limit = roundData.timeLimit || (isPractice ? 60 : 120);
       const remain = Math.max(0, limit - elapsedSec);
       setTimeRemaining(remain);
 
@@ -110,10 +141,12 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
     }, 1000);
 
     return () => clearInterval(timerIntervalRef.current);
-  }, [roundData, loading, submitting]);
+  }, [roundData, loading, submitting, practiceResult]);
 
-  // Anti-Cheat: Tab Visibility Listener
+  // Anti-Cheat: Tab Visibility Listener (Only in official contest)
   useEffect(() => {
+    if (isPractice) return;
+
     const handleVisibilityChange = () => {
       if (document.hidden && !submitting) {
         setTabSwitches((prev) => {
@@ -132,13 +165,12 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [submitting]);
+  }, [submitting, isPractice]);
 
   // Process a key event (handles Space, Backspace, and Characters)
   const processKey = (e) => {
-    if (loading || !roundData || submitting || showWarningModal) return;
+    if (loading || !roundData || submitting || showWarningModal || practiceResult) return;
 
-    // Prevent duplicate processing of the same event
     if (e._processed) return;
     e._processed = true;
 
@@ -159,42 +191,33 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
     const currentWord = wList[cIdx] || '';
     const currentTyped = typedWordsRef.current[cIdx] || '';
 
-    // 1. SPACE: Dynamic jump to the next word!
-    // "if he misses any letter or symbols it doesnt matter when he click space it dynamically moves to the next word"
+    // 1. SPACE: Dynamic jump to next word
     if (e.key === ' ' || e.code === 'Space') {
       e.preventDefault();
-      // Move to next word if not at last word
       if (cIdx < wList.length - 1) {
         const nextIdx = cIdx + 1;
         currentWordIndexRef.current = nextIdx;
         setCurrentWordIndex(nextIdx);
       } else {
-        // If on the last word and user presses space, submit
         handleSubmit();
       }
       return;
     }
 
     // 2. BACKSPACE / DELETE
-    // Round 1: Allowed
-    // Round 2: Allowed
-    // Round 3: BLOCKED!
     if (e.key === 'Backspace' || e.key === 'Delete') {
       if (!permissions.backspaceAllowed) {
-        // Blocked in Round 3
         e.preventDefault();
         return;
       }
 
       e.preventDefault();
-      // If current word has typed characters, erase last character
       if (currentTyped.length > 0) {
         const updated = [...typedWordsRef.current];
         updated[cIdx] = currentTyped.slice(0, -1);
         typedWordsRef.current = updated;
         setTypedWords(updated);
       }
-      // Once space is clicked, there is NO going back to previous word!
       return;
     }
 
@@ -203,7 +226,6 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
       e.preventDefault();
       const char = e.key;
 
-      // Allow user to enter letters freely without stopping extra letters
       const updated = [...typedWordsRef.current];
       updated[cIdx] = currentTyped + char;
       typedWordsRef.current = updated;
@@ -211,31 +233,28 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
     }
   };
 
-  // SINGLE Global key listener: Guarantees every single keystroke is captured exactly once
+  // Global Key Listener
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Don't intercept if clicking an actual button
       if (e.target.tagName === 'BUTTON') return;
       processKey(e);
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [loading, roundData, submitting, showWarningModal]);
+  }, [loading, roundData, submitting, showWarningModal, practiceResult]);
 
-  // Submit Handler: Ref-backed to guarantee 100% accurate data
+  // Submit Handler
   const handleSubmit = async () => {
     if (submitting) return;
     clearInterval(timerIntervalRef.current);
     setSubmitting(true);
 
-    // Calculate actual elapsed duration in seconds
     const now = Date.now();
     const actualSeconds = startTimeRef.current
       ? Math.max(1, Math.round((now - startTimeRef.current) / 1000))
       : Math.max(1, elapsedDisplay);
 
-    // Reconstruct full typed string from typedWordsRef
     const wList = wordsRef.current;
     const tList = typedWordsRef.current;
     const fullTypedText = wList
@@ -243,6 +262,39 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
       .join(' ')
       .trim();
 
+    // IF PRACTICE MODE: Compute locally and show practice review modal
+    if (isPractice) {
+      let correctChars = 0;
+      let totalTyped = 0;
+      for (let w = 0; w < wList.length; w++) {
+        const oW = wList[w] || '';
+        const tW = tList[w] || '';
+        totalTyped += tW.length;
+        const charLen = Math.min(oW.length, tW.length);
+        for (let c = 0; c < charLen; c++) {
+          if (oW[c] === tW[c]) correctChars++;
+        }
+        if (w < wList.length - 1 && tW.length > 0) {
+          totalTyped++;
+          correctChars++;
+        }
+      }
+      const minutes = actualSeconds / 60;
+      const wpm = Math.max(0, Math.round((correctChars / 5) / minutes));
+      const accuracy = totalTyped > 0 ? Math.max(0, Math.min(100, Math.round((correctChars / totalTyped) * 1000) / 10)) : 0;
+
+      setPracticeResult({
+        wpm,
+        accuracy,
+        timeTakenSeconds: actualSeconds,
+        totalChars: totalTyped,
+        correctChars
+      });
+      setSubmitting(false);
+      return;
+    }
+
+    // OFFICIAL CONTEST ROUND: Submit to API and persist in MongoDB Atlas
     try {
       const res = await fetch('/api/contest/submit', {
         method: 'POST',
@@ -269,12 +321,27 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
     }
   };
 
+  // Reset practice
+  const handleRetryPractice = () => {
+    setPracticeResult(null);
+    const initialTyped = new Array(words.length).fill('');
+    setTypedWords(initialTyped);
+    typedWordsRef.current = initialTyped;
+    currentWordIndexRef.current = 0;
+    setCurrentWordIndex(0);
+    setTimeRemaining(60);
+    setElapsedDisplay(0);
+    setSubmitting(false);
+    startTimeRef.current = Date.now();
+    if (inputRef.current) inputRef.current.focus();
+  };
+
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-4">
         <div className="w-12 h-12 border-4 border-burgundy-700 border-t-gold-400 rounded-full animate-spin" />
         <p className="text-gray-300 text-sm font-medium">
-          Entering BCAlgorix Arena (Round {roundNumber})...
+          {isPractice ? 'Loading 1-Minute Practice Warm-Up...' : `Entering BCAlgorix Arena (Round ${roundNumber})...`}
         </p>
       </div>
     );
@@ -297,100 +364,178 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
   }
 
   const permissions = roundData.permissions;
-  const isMasked = permissions.maskAsterisk; // Round 2 & 3: true; Round 1: false
-  const isBackspaceAllowed = permissions.backspaceAllowed; // Round 1 & 2: true; Round 3: false
+  const isMasked = permissions.maskAsterisk;
+  const isBackspaceAllowed = permissions.backspaceAllowed;
 
   // Format MM:SS timer
   const minutes = Math.floor(timeRemaining / 60);
   const seconds = timeRemaining % 60;
   const formattedTime = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 
-  // Count characters typed
-  const totalCharsTyped = typedWords.reduce((acc, w) => acc + (w ? w.length : 0), 0);
-  const totalPromptChars = words.reduce((acc, w) => acc + w.length, 0);
+  // REAL-TIME METRICS CALCULATION (Deterministic & Continuous)
+  let totalCharsTyped = 0;
+  let liveCorrectChars = 0;
+  let completedWordsCount = 0;
+
+  for (let w = 0; w <= currentWordIndex && w < words.length; w++) {
+    const oW = words[w] || '';
+    const tW = typedWords[w] || '';
+    totalCharsTyped += tW.length;
+
+    const minLen = Math.min(oW.length, tW.length);
+    for (let c = 0; c < minLen; c++) {
+      if (oW[c] === tW[c]) liveCorrectChars++;
+    }
+
+    if (w < currentWordIndex) {
+      if (tW.length > 0) {
+        completedWordsCount++;
+        totalCharsTyped++; // include committed space
+        liveCorrectChars++; // matched space
+      }
+    }
+  }
+
+  const totalPromptChars = words.reduce((acc, w) => acc + w.length, 0) + Math.max(0, words.length - 1);
+  const elapsedMinutes = Math.max(0.01, elapsedDisplay / 60);
+  const liveWpm = elapsedDisplay >= 1 ? Math.round((liveCorrectChars / 5) / elapsedMinutes) : 0;
+  const liveAccuracy = totalCharsTyped > 0
+    ? Math.max(0, Math.min(100, Math.round((liveCorrectChars / totalCharsTyped) * 1000) / 10))
+    : 100;
 
   return (
     <div 
-      className="max-w-5xl mx-auto px-4 sm:px-6 py-6 no-select relative"
+      className="max-w-5xl mx-auto px-4 sm:px-6 py-4 no-select relative"
       onContextMenu={(e) => e.preventDefault()}
       onCopy={(e) => e.preventDefault()}
       onPaste={(e) => e.preventDefault()}
       onCut={(e) => e.preventDefault()}
     >
       
-      {/* Top Header Bar */}
-      <div className="bg-wine-card/95 border border-wine-border rounded-2xl p-4 sm:p-5 mb-6 shadow-burgundy flex flex-col sm:flex-row items-center justify-between gap-4">
+      {/* REAL-TIME STICKY STATS NAV BAR: Stays at the top during scrolling! */}
+      <div className="sticky top-20 z-40 bg-[#160205]/95 border border-burgundy-700/70 rounded-2xl p-3.5 sm:px-6 mb-4 backdrop-blur-md shadow-burgundy flex flex-wrap items-center justify-between gap-3">
         
-        <div>
-          <div className="flex items-center space-x-2 mb-1">
-            <span className="text-xs uppercase tracking-widest font-bold text-gold-400">
-              BCAlgorix Contest Arena
-            </span>
-            <span className="text-gray-600">•</span>
-            <span className="text-xs text-gray-400 font-mono-code">
-              Round {roundNumber} of 3
+        {/* Left: Mode / Round Tag */}
+        <div className="flex items-center space-x-2.5">
+          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider ${
+            isPractice 
+              ? 'bg-amber-950 border border-gold-500 text-gold-300' 
+              : 'bg-burgundy-900 border border-burgundy-600 text-gold-400'
+          }`}>
+            {isPractice ? `Practice Arena (M${practiceMode})` : `Round ${roundNumber}`}
+          </span>
+          <span className="text-xs text-gray-300 font-medium hidden sm:inline">
+            {roundData.title}
+          </span>
+        </div>
+
+        {/* Center: Live Stats Badges */}
+        <div className="flex items-center space-x-4 sm:space-x-6 text-xs sm:text-sm font-mono-code">
+          
+          {/* Live Speed (WPM) */}
+          <div className="flex items-center space-x-1.5">
+            <Zap className="w-4 h-4 text-gold-400" />
+            <span className="text-gray-400 hidden xs:inline">Speed:</span>
+            <span className="font-extrabold text-gold-400 text-sm sm:text-base">
+              {liveWpm} <span className="text-[10px] text-gray-400 font-normal">WPM</span>
             </span>
           </div>
-          <h1 className="text-xl sm:text-2xl font-fest font-bold text-white tracking-wide">
-            {roundData.title}
-          </h1>
+
+          {/* Live Accuracy */}
+          <div className="flex items-center space-x-1.5">
+            <Target className="w-4 h-4 text-emerald-400" />
+            <span className="text-gray-400 hidden xs:inline">Acc:</span>
+            <span className="font-extrabold text-emerald-400 text-sm sm:text-base">
+              {liveAccuracy}%
+            </span>
+          </div>
+
+          {/* Words Count */}
+          <div className="flex items-center space-x-1.5 hidden sm:flex">
+            <span className="text-gray-400">Words:</span>
+            <span className="font-bold text-gray-200">
+              {completedWordsCount} / {words.length}
+            </span>
+          </div>
+
+          {/* Chars Count */}
+          <div className="flex items-center space-x-1.5 hidden md:flex">
+            <FileText className="w-4 h-4 text-sky-400" />
+            <span className="text-gray-400">Chars:</span>
+            <span className="font-bold text-gray-200">
+              {totalCharsTyped} / {totalPromptChars}
+            </span>
+          </div>
+
         </div>
 
-        {/* Live Badges */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Masking Badge */}
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border ${
-            isMasked
-              ? 'bg-burgundy-950/90 border-burgundy-600 text-gold-300 shadow-sm'
-              : 'bg-wine-dark border-wine-border text-gray-200'
-          }`}>
-            {isMasked ? <EyeOff className="w-3.5 h-3.5 text-gold-400" /> : <Eye className="w-3.5 h-3.5 text-gray-300" />}
-            <span>{isMasked ? 'Masked (*)' : 'Visible Keystrokes'}</span>
-          </span>
-
-          {/* Backspace Badge */}
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border ${
-            isBackspaceAllowed
-              ? 'bg-emerald-950/70 border-emerald-700 text-emerald-300'
-              : 'bg-red-950/80 border-red-700 text-red-300 font-bold'
-          }`}>
-            <Delete className="w-3.5 h-3.5" />
-            <span>{isBackspaceAllowed ? 'Backspace ON' : 'Backspace BLOCKED'}</span>
-          </span>
-
-          {/* Anti-Cheat Badge */}
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-wine-dark border border-wine-border text-gray-300">
-            <ShieldAlert className="w-3.5 h-3.5 text-burgundy-400" />
-            <span>Anti-Cheat Guard</span>
-          </span>
-        </div>
-
-        {/* Live Timer */}
-        <div className={`flex items-center space-x-2.5 px-4 py-2 rounded-xl border ${
-          timeRemaining < 30
-            ? 'bg-red-950/90 border-red-500 text-red-300 animate-pulse'
+        {/* Right: Timer Countdown */}
+        <div className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border ${
+          timeRemaining < 20
+            ? 'bg-red-950 border-red-500 text-red-400 animate-pulse'
             : 'bg-wine-dark border-wine-border text-gold-400'
         }`}>
-          <Clock className="w-5 h-5 flex-shrink-0" />
-          <div className="text-right">
-            <span className="text-[10px] uppercase tracking-wider block text-gray-400 leading-none">
-              Time Left
-            </span>
-            <span className="text-2xl font-mono-code font-bold tracking-wider leading-tight">
-              {formattedTime}
-            </span>
-          </div>
+          <Clock className="w-4 h-4" />
+          <span className="font-mono-code font-bold text-base sm:text-lg">
+            {formattedTime}
+          </span>
         </div>
 
       </div>
 
-      {/* MONKEYTYPE-INSPIRED TYPING CANVAS */}
+      {/* PRACTICE MODE SELECTOR TABS (Only in Practice Arena) */}
+      {isPractice && (
+        <div className="flex flex-wrap items-center justify-between bg-wine-card/80 border border-wine-border/70 rounded-xl p-2.5 mb-4 gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <span className="text-xs font-semibold text-gray-400 mr-1">Select Practice Mode:</span>
+            <button
+              onClick={() => onChangePracticeMode && onChangePracticeMode(1)}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                practiceMode === 1
+                  ? 'bg-burgundy-900 border border-gold-500 text-gold-300 shadow-sm'
+                  : 'text-gray-400 hover:text-white bg-wine-dark border border-wine-border/60'
+              }`}
+            >
+              Mode 1: Normal
+            </button>
+            <button
+              onClick={() => onChangePracticeMode && onChangePracticeMode(2)}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                practiceMode === 2
+                  ? 'bg-burgundy-900 border border-gold-500 text-gold-300 shadow-sm'
+                  : 'text-gray-400 hover:text-white bg-wine-dark border border-wine-border/60'
+              }`}
+            >
+              Mode 2: Masked (*)
+            </button>
+            <button
+              onClick={() => onChangePracticeMode && onChangePracticeMode(3)}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                practiceMode === 3
+                  ? 'bg-burgundy-900 border border-gold-500 text-gold-300 shadow-sm'
+                  : 'text-gray-400 hover:text-white bg-wine-dark border border-wine-border/60'
+              }`}
+            >
+              Mode 3: Extreme Blind (*)
+            </button>
+          </div>
+
+          <button
+            onClick={onCancel}
+            className="text-xs text-gray-400 hover:text-white px-2 py-1 underline ml-auto"
+          >
+            Exit Practice
+          </button>
+        </div>
+      )}
+
+      {/* TYPING CANVAS: Monkeytype-style flowing layout */}
       <div 
         onClick={() => inputRef.current && inputRef.current.focus()}
         className="bg-[#140206] border border-burgundy-900/80 hover:border-burgundy-600/70 rounded-2xl p-6 sm:p-10 shadow-burgundy-lg min-h-[380px] relative transition-colors cursor-text select-none overflow-hidden"
       >
         
-        {/* Invisible capture input covering the entire canvas to retain focus */}
+        {/* Invisible focus input */}
         <input
           ref={inputRef}
           type="text"
@@ -404,7 +549,7 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
           autoCapitalize="off"
         />
 
-        {/* Unfocused Blur Overlay Reminder */}
+        {/* Unfocused Overlay */}
         {!isFocused && (
           <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] z-20 flex items-center justify-center pointer-events-none">
             <div className="px-5 py-2.5 rounded-xl bg-wine-card border border-gold-500/50 shadow-gold text-gold-300 text-sm font-semibold flex items-center gap-2 animate-pulse">
@@ -414,34 +559,31 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
           </div>
         )}
 
-        {/* Top Mini Header: Progress counter */}
+        {/* Mode Rules Banner */}
         <div className="flex items-center justify-between pb-4 mb-6 border-b border-wine-border/40 text-xs text-gray-400 font-mono-code">
           <div className="flex items-center space-x-2 text-gold-400">
             <Keyboard className="w-4 h-4" />
             <span>
-              {roundNumber === 1 && "Mode: Visible Typing (Press Space to advance words)"}
-              {roundNumber === 2 && "Mode: Semi-Blind (*) Typing (Backspace allowed)"}
-              {roundNumber === 3 && "Mode: Championship Blind (*) Gauntlet (Backspace locked)"}
+              {isMasked 
+                ? "Masked (*) Typing. Characters are hidden. Press [Space] to commit word." 
+                : "Visible Typing. Press [Space] to commit word."}
             </span>
           </div>
 
           <div className="flex items-center space-x-3">
             <span>Word: {Math.min(currentWordIndex + 1, words.length)} / {words.length}</span>
-            <span>•</span>
-            <span>Chars: {totalCharsTyped} / {totalPromptChars}</span>
           </div>
         </div>
 
-        {/* THE WORDS STREAM: Flowing text with fixed letters & vertical caret cursor */}
+        {/* THE WORDS STREAM: Past words show only typed letters. Current word shows typed + caret + remainder. */}
         <div className="font-mono text-xl sm:text-2xl leading-relaxed sm:leading-[2.2] tracking-wider flex flex-wrap gap-x-3.5 gap-y-3 items-center">
           {words.map((word, wIdx) => {
             const isCurrentWord = wIdx === currentWordIndex;
             const isPastWord = wIdx < currentWordIndex;
             const typedWord = typedWords[wIdx] || '';
 
-            // 1. PAST WORD: User clicked Space and committed this word.
-            // Render ONLY what the user typed (half word, exact word, or extra letters).
-            // The remaining untyped letters of the prompt word are completely omitted.
+            // 1. PAST WORD (Committed when user pressed Space):
+            // Shows ONLY what the user typed (no trailing untyped letters!)
             if (isPastWord) {
               if (!typedWord) return null;
 
@@ -465,14 +607,13 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
             }
 
             // 2. CURRENT ACTIVE WORD:
-            // Renders typed characters (plus any extra characters), the caret line, and the remaining prompt letters.
             if (isCurrentWord) {
               const typedLen = typedWord.length;
               const promptLen = word.length;
 
               return (
                 <span key={wIdx} className="inline-flex items-center relative whitespace-nowrap">
-                  {/* Typed characters of current word */}
+                  {/* Typed letters of current word */}
                   {typedWord.split('').map((char, lIdx) => {
                     const displayChar = isMasked ? '*' : char;
                     return (
@@ -487,10 +628,10 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
                     );
                   })}
 
-                  {/* Vertical blinking caret cursor */}
+                  {/* Vertical Caret Cursor */}
                   <span className="inline-block w-[2.5px] h-[1.25em] bg-gold-400 rounded-full animate-caret -ml-[1px] mr-[1px] shadow-gold align-middle" />
 
-                  {/* Untyped remaining prompt characters of this word (if any) */}
+                  {/* Untyped remaining prompt characters */}
                   {typedLen < promptLen && (
                     word.slice(typedLen).split('').map((char, rIdx) => (
                       <span
@@ -506,7 +647,6 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
             }
 
             // 3. FUTURE WORDS:
-            // Full prompt word in clear muted color
             return (
               <span key={wIdx} className="inline-flex items-center whitespace-nowrap">
                 {word.split('').map((char, lIdx) => (
@@ -519,7 +659,7 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
           })}
         </div>
 
-        {/* Bottom Helper Bar */}
+        {/* Helper Toolbar */}
         <div className="mt-8 pt-4 border-t border-wine-border/40 flex items-center justify-between text-xs text-gray-400">
           <div className="flex items-center space-x-2">
             <span className="px-2 py-0.5 rounded bg-wine-card border border-wine-border font-mono text-gold-300 text-[11px] font-bold">
@@ -529,31 +669,112 @@ export default function TypingArenaPage({ roundNumber, token, onFinishRound, onC
           </div>
 
           <span className="text-gray-400 font-mono-code">
-            Elapsed Time: {elapsedDisplay}s
+            Elapsed: {elapsedDisplay}s
           </span>
         </div>
 
       </div>
 
-      {/* Bottom Actions Bar */}
+      {/* Bottom Action Footer */}
       <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
         <p className="text-xs text-gray-400">
-          Typing registers immediately. When finished with your attempt, submit below.
+          {isPractice 
+            ? "1-minute practice round. You can test your speed as many times as you like." 
+            : "Contest attempt. Keystrokes are submitted to the official BCAlgorix leaderboard."}
         </p>
 
         <div className="flex items-center space-x-3 w-full sm:w-auto">
+          {isPractice ? (
+            <button
+              onClick={handleRetryPractice}
+              className="px-5 py-3 rounded-xl bg-wine-card hover:bg-wine-cardHover border border-wine-border text-gray-200 text-sm font-semibold flex items-center gap-2 transition-all"
+            >
+              <RotateCcw className="w-4 h-4 text-gold-400" />
+              <span>Reset Practice</span>
+            </button>
+          ) : null}
+
           <button
             onClick={handleSubmit}
             disabled={submitting || totalCharsTyped === 0}
             className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-burgundy-700 via-burgundy-600 to-burgundy-700 hover:from-burgundy-600 hover:to-burgundy-500 text-white font-bold text-sm shadow-burgundy flex items-center justify-center space-x-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed z-20"
           >
             <Send className="w-4 h-4" />
-            <span>{submitting ? 'Submitting Attempt...' : 'Finish & Submit Round'}</span>
+            <span>{submitting ? 'Submitting...' : isPractice ? 'Finish Practice' : 'Finish & Submit Round'}</span>
           </button>
         </div>
       </div>
 
-      {/* Anti-Cheat Warning Modal */}
+      {/* PRACTICE RESULT MODAL (For 1-minute practice sessions) */}
+      {practiceResult && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-gradient-to-b from-wine-card to-wine-dark border border-gold-500/70 rounded-3xl max-w-lg w-full p-6 sm:p-8 text-center shadow-gold relative">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-700 to-gold-500 border border-gold-400 shadow-gold mb-4">
+              <Sparkles className="w-8 h-8 text-black" />
+            </div>
+
+            <h2 className="text-2xl sm:text-3xl font-fest font-bold text-white mb-1">
+              Practice Complete!
+            </h2>
+            <p className="text-xs uppercase tracking-widest text-gold-400 font-semibold mb-6">
+              1-Minute Warm-Up Performance
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="bg-wine-dark border border-wine-border rounded-2xl p-4">
+                <span className="text-xs text-gray-400 block uppercase font-semibold">Speed</span>
+                <span className="text-3xl font-mono-code font-extrabold text-gold-400">
+                  {practiceResult.wpm}
+                </span>
+                <span className="text-[11px] text-gray-400 block mt-1">Words Per Minute</span>
+              </div>
+
+              <div className="bg-wine-dark border border-wine-border rounded-2xl p-4">
+                <span className="text-xs text-gray-400 block uppercase font-semibold">Accuracy</span>
+                <span className="text-3xl font-mono-code font-extrabold text-emerald-400">
+                  {practiceResult.accuracy}%
+                </span>
+                <span className="text-[11px] text-gray-400 block mt-1">Precision</span>
+              </div>
+
+              <div className="bg-wine-dark border border-wine-border rounded-2xl p-4">
+                <span className="text-xs text-gray-400 block uppercase font-semibold">Duration</span>
+                <span className="text-2xl font-mono-code font-bold text-white">
+                  {practiceResult.timeTakenSeconds}s
+                </span>
+                <span className="text-[11px] text-gray-400 block mt-1">Time Elapsed</span>
+              </div>
+
+              <div className="bg-wine-dark border border-wine-border rounded-2xl p-4">
+                <span className="text-xs text-gray-400 block uppercase font-semibold">Characters</span>
+                <span className="text-2xl font-mono-code font-bold text-white">
+                  {practiceResult.totalChars}
+                </span>
+                <span className="text-[11px] text-gray-400 block mt-1">Total Typed</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={handleRetryPractice}
+                className="flex-1 py-3 px-4 rounded-xl bg-wine-card hover:bg-wine-cardHover border border-wine-border text-gray-200 text-sm font-semibold flex items-center justify-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4 text-gold-400" />
+                <span>Practice Again</span>
+              </button>
+
+              <button
+                onClick={onCancel}
+                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-gold-500 to-amber-500 hover:from-gold-400 hover:to-amber-400 text-black font-bold text-sm shadow-gold"
+              >
+                <span>{token ? 'Go to Contest Arena' : 'Sign In for Contest'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Anti-Cheat Warning Modal (Contest Only) */}
       {showWarningModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-wine-card border-2 border-red-700 rounded-2xl max-w-md w-full p-6 text-center shadow-burgundy-lg">
